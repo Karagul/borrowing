@@ -161,14 +161,15 @@ def up_to_date_report():
     conn = create_connection(database, )
     cursor = conn.cursor()
     sql = \
-    '''SELECT
-        start_date AS 'Дата начала', end_date AS 'Дата окончания',
-        title AS '№ договора займа', body AS 'Тело', rate AS 'Ставка', payment.date AS 'Дата платежа',
-        payment.amount AS 'Размер платежа', payment.type AS 'Тип платежа' FROM borrowing
-       LEFT JOIN payment ON payment.borrowing=borrowing.id'''
-
-    # date = wb.sheets['up_to_date'].range("B3").value.strftime('%Y-%m-%d')
-    query = cursor.execute(sql, )
+        '''SELECT * FROM corr_br_sp
+        WHERE (start_date < ? OR start_date IS NULL) AND (s_date < ? OR s_date IS NULL)'''
+    date = wb.sheets['up_to_date'].range("B3").value.strftime('%Y-%m-%d')
+    query = cursor.execute(sql, [date, date])
     cols = [column[0] for column in query.description]
     data = pd.DataFrame(query.fetchall(), columns=cols)
-    wb.sheets['up_to_date'].range('A6').options(index=False).value = data
+    grouped = \
+        data.set_index(['title'], drop=True)
+    """grouped['test'] = ((grouped['Пролонгация до'] -
+        grouped['Дата начала']).dt.days / 365) * grouped['Тело'] * grouped['Ставка по договору займа']"""
+    grouped['Дата расчета'] = date
+    wb.sheets['up_to_date'].range('A9').options(index=True).value = grouped
