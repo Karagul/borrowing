@@ -201,6 +201,7 @@ def up_to_date_report():
     try:
         grouped = \
             data.set_index(['title', 'agr_title'], drop=True)
+        wb.sheets['up_to_date'].range('A10:O1000').clear_contents()
         wb.sheets['up_to_date'].range('A10').options(index=False).value = \
             valid_rate(grouped)
         wb.sheets['up_to_date'].range('B6').options(index=False).value = \
@@ -237,13 +238,13 @@ def valid_rate(data):
     group = None
     groups = []
     indexes = []
-    data['valid_from'] = None
-    data['valid_until'] = None
-    data['valid_rate'] = data['agr_rate']
     start_date = wb.sheets['up_to_date'].range("B3").value.strftime('%Y-%m-%d')
     start_date = datetime.datetime.date(datetime.datetime.strptime(start_date, '%Y-%m-%d'))
     end_date = wb.sheets['up_to_date'].range("C3").value.strftime('%Y-%m-%d')
     end_date = datetime.datetime.date(datetime.datetime.strptime(end_date, '%Y-%m-%d'))
+    data['valid_from'] = None
+    data['valid_until'] = None
+    data['valid_rate'] = data['agr_rate']
     payments = join_py_on_sp(end_date)
     new_data = pd.DataFrame()
     new_data['percents'] = 0
@@ -263,11 +264,20 @@ def valid_rate(data):
                 group['valid_from'][i] = group['s_date'][i]
                 if len(group) == 1:
                     group['valid_until'][i] = group['s_date'][i+1]
+                    group['valid_from'][i], group['valid_until'][i] = \
+                        overlap(group['valid_from'][i], group['valid_until'][i],
+                                start_date, end_date)
                 else:
                     group['valid_until'][i] = group['s_date'][i+1] - datetime.timedelta(days=1)
+                    group['valid_from'][i], group['valid_until'][i] = \
+                        overlap(group['valid_from'][i], group['valid_until'][i],
+                                start_date, end_date)
             elif 0 < i < (len(group)-1):
                 group['valid_from'][i] = group['s_date'][i]
                 group['valid_until'][i] = group['s_date'][i+1] - datetime.timedelta(days=1)
+                group['valid_from'][i], group['valid_until'][i] = \
+                    overlap(group['valid_from'][i], group['valid_until'][i],
+                            start_date, end_date)
 
         groups.append(group)
 
@@ -287,11 +297,11 @@ def valid_rate(data):
                     if row['type'] == '1':
                         new_data['percents'][j] -= row['amount']
                     elif row['type'] == '2':
-                        new_data['body'].loc[new_data['borrowing'] == g['borrowing']] -= row['amount']
+                        new_data['body'][(j+1):].loc[new_data['borrowing'] == g['borrowing']] -= row['amount']
 
     new_data['percents'] += ((new_data['valid_until'] -
             new_data['valid_from']).dt.days / 365) * \
         new_data['body'] * new_data['valid_rate']
-    new_data = new_data.loc[(new_data['valid_from'] = start_date) & (new_data['valid_until'] <= end_date)]
+    new_data = new_data.loc[(new_data['valid_from'] >= start_date) & (new_data['valid_until'] <= end_date) & (new_data['valid_days'] > 0)]
 
     return new_data
