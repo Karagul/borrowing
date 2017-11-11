@@ -47,6 +47,8 @@ def insert_a_borrowing():
             # create a new borrowing
             borrowing = (title, body, rate, start_date, end_date)
             borrowing_id = create_borrowing(conn, borrowing)
+            sup_agreement = (start_date, '__' + title, borrowing_id, rate, end_date)
+            sup_agreement_id = create_sup_agreement(conn, sup_agreement)
             wb.sheets['management'].range("A18").color = (146, 208, 80)
             wb.sheets['management'].range("A18").value = \
                 str(datetime.datetime.now()) + \
@@ -109,8 +111,8 @@ def insert_a_payment():
 
 
 def create_sup_agreement(conn, client):
-    sql = ''' INSERT INTO sup_agreement(title, borrowing, rate, date)
-              VALUES(?,?,?,?)'''
+    sql = '''INSERT INTO sup_agreement(date, title, borrowing, rate, prlng_until)
+             VALUES(?,?,?,?,?)'''
     cur = conn.cursor()
     cur.execute(sql, client)
     return cur.lastrowid
@@ -123,7 +125,8 @@ def insert_a_sup_agreement():
     rate = wb.sheets['management'].range("D14").value
 
     try:
-        date = wb.sheets['management'].range("E14").value.strftime('%Y-%m-%d')
+        prlng_until = wb.sheets['management'].range("E14").value.strftime('%Y-%m-%d')
+        date = wb.sheets['management'].range("A14").value.strftime('%Y-%m-%d')
     except AttributeError as e:
         wb.sheets['management'].range("E14").color = (240, 100, 77)
         wb.sheets['management'].range("E14").value = \
@@ -136,10 +139,12 @@ def insert_a_sup_agreement():
     try:
         with conn:
         # create a new sup_agreement
-            sup_agreement = (title, borrowing, rate, date);
+            sup_agreement = (date, title, borrowing, rate, prlng_until);
             sup_agreement_id = create_sup_agreement(conn, sup_agreement)
             wb.sheets['management'].range("A18").color = (146, 208, 80)
-            wb.sheets['management'].range("A18").value = str(datetime.datetime.now()) + ": Создано доп. соглашение " + str(title)
+            wb.sheets['management'].range("A18").value = \
+                str(datetime.datetime.now()) + \
+                ": Создано доп. соглашение " + str(title)
 
     except sqlite3.IntegrityError as e:
         wb.sheets['management'].range("A18").color = (240, 100, 77)
@@ -186,23 +191,20 @@ def up_to_date_report():
     sql = \
         '''
         SELECT * FROM corr_br_sp
-        WHERE (start_date < ? OR start_date IS NULL)
-        AND (s_date < ? OR s_date IS NULL)
+        WHERE (s_date <= ?)
         '''
-    date = wb.sheets['up_to_date'].range("B3").value
-    query = cursor.execute(sql, [date, date])
+    start_date = wb.sheets['up_to_date'].range("B3").value
+    end_date = wb.sheets['up_to_date'].range("C3").value
+    query = cursor.execute(sql, [end_date])
     cols = [column[0] for column in query.description]
     data = pd.DataFrame(query.fetchall(), columns=cols)
     try:
         grouped = \
             data.set_index(['title', 'agr_title'], drop=True)
-        grouped['valid_from'] = grouped['start_date']
-        grouped['valid_until'] = grouped['end_date']
-        grouped['valid_rate'] = grouped['rate']
-        grouped['valid_days'] = \
-            (grouped['valid_until'] - grouped['valid_from']).dt.days
-        wb.sheets['up_to_date'].range('A9').options(index=True).value = \
+        wb.sheets['up_to_date'].range('A10').options(index=False).value = \
             valid_rate(grouped)
+        wb.sheets['up_to_date'].range('B6').options(index=False).value = \
+            valid_rate(grouped)['percents'].sum()
     except AttributeError:
         pass
 
@@ -225,16 +227,24 @@ def join_py_on_sp(date):
         return payments
 
 
+def overlap(A_start, A_end, B_start, B_end):
+    latest_start = max(A_start, B_start)
+    earliest_end = min(A_end, B_end)
+    return (latest_start, earliest_end)
+
 def valid_rate(data):
     wb = xw.Book.caller()
     group = None
     groups = []
     indexes = []
-    date = wb.sheets['up_to_date'].range("B3").value.strftime('%Y-%m-%d')
-    date = datetime.datetime.date(datetime.datetime.strptime(date, '%Y-%m-%d'))
-    payments = join_py_on_sp(date)
-    if payments is None:
-        return None
+    data['valid_from'] = None
+    data['valid_until'] = None
+    data['valid_rate'] = data['agr_rate']
+    start_date = wb.sheets['up_to_date'].range("B3").value.strftime('%Y-%m-%d')
+    start_date = datetime.datetime.date(datetime.datetime.strptime(start_date, '%Y-%m-%d'))
+    end_date = wb.sheets['up_to_date'].range("C3").value.strftime('%Y-%m-%d')
+    end_date = datetime.datetime.date(datetime.datetime.strptime(end_date, '%Y-%m-%d'))
+    payments = join_py_on_sp(end_date)
     new_data = pd.DataFrame()
     new_data['percents'] = 0
 
@@ -244,30 +254,27 @@ def valid_rate(data):
 
     for item in indexes:
         group = data.xs(item, level='title')
-        if len(group) >= 2:
-            for i in range(0, len(group)):
-                group['valid_rate'][i] = group['agr_rate'][i]
+        for i in range((len(group)-1), -1, -1):
+            if i == (len(group)-1):
+                group['valid_from'][i], group['valid_until'][i] = \
+                    overlap(group['s_date'][i], group['prlng_until'][i],
+                            start_date, end_date)
+            elif i == 0:
                 group['valid_from'][i] = group['s_date'][i]
-                if i < len(group)-1:
+                if len(group) == 1:
                     group['valid_until'][i] = group['s_date'][i+1]
-                    if date >= group['valid_from'][i] \
-                            and date <= group['valid_until'][i]:
-                        group['valid_until'] = date
                 else:
-                    group['valid_until'][i] = group['prlng_until'][i]
-                    if date >= group['valid_from'][i] \
-                            and date <= group['valid_until'][i]:
-                        group['valid_until'] = date
-                    group['valid_days'] = \
-                        (group['valid_until'] - group['valid_from']).dt.days
-        else:
-            if date >= group['valid_from'][0] \
-                    and date <= group['valid_until'][0]:
-                group['valid_until'] = date
+                    group['valid_until'][i] = group['s_date'][i+1] - datetime.timedelta(days=1)
+            elif 0 < i < (len(group)-1):
+                group['valid_from'][i] = group['s_date'][i]
+                group['valid_until'][i] = group['s_date'][i+1] - datetime.timedelta(days=1)
+
         groups.append(group)
 
     new_data = pd.concat(groups).sort_values(['borrowing'])
-    new_data.reset_index(drop=True, inplace=True)
+    new_data.reset_index(drop=False, inplace=True)
+    new_data['valid_days'] = \
+        (new_data['valid_until'] - new_data['valid_from']).dt.days
     new_data['percents'] = \
         ((new_data['valid_until'] -
             new_data['valid_from']).dt.days / 365) * \
@@ -275,18 +282,16 @@ def valid_rate(data):
 
     for i, row in payments.iterrows():
             for j, g in new_data.iterrows():
-                if row['borrowing'] == g['borrowing'] and g['valid_from'] < row['date'] <= g['valid_until']:
+                if row['borrowing'] == g['borrowing'] \
+                        and g['valid_from'] < row['date'] <= g['valid_until']:
                     if row['type'] == '1':
                         new_data['percents'][j] -= row['amount']
                     elif row['type'] == '2':
-                        new_data['body'][j] -= row['amount']
-                        try:
-                            if new_data['borrowing'][j+1] == row['borrowing']:
-                                new_data['body'][j+1] -= row['amount']
-                        except KeyError as e:
-                            pass
+                        new_data['body'].loc[new_data['borrowing'] == g['borrowing']] -= row['amount']
 
-    new_data['percents'] += \
-        ((new_data['valid_until'] -
+    new_data['percents'] += ((new_data['valid_until'] -
             new_data['valid_from']).dt.days / 365) * \
         new_data['body'] * new_data['valid_rate']
+    new_data = new_data.loc[(new_data['valid_from'] = start_date) & (new_data['valid_until'] <= end_date)]
+
+    return new_data
