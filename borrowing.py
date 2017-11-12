@@ -108,7 +108,7 @@ def insert_a_payment():
             wb.sheets['management'].range("A18").value = \
                 str(datetime.datetime.now()) + \
                 ": Создан платеж в размере " + str(amount) + \
-                " к договору займа " + borrowing
+                " к договору займа " + str(borrowing)
 
     except sqlite3.IntegrityError as e:
         wb.sheets['management'].range("A18").color = (240, 100, 77)
@@ -151,7 +151,7 @@ def insert_a_sup_agreement():
             wb.sheets['management'].range("A18").value = \
                 str(datetime.datetime.now()) + \
                 ": Создано доп. соглашение " + str(title) + \
-                " к договору займа " + borrowing
+                " к договору займа " + str(borrowing)
 
     except sqlite3.IntegrityError as e:
         wb.sheets['management'].range("A18").color = (240, 100, 77)
@@ -214,6 +214,7 @@ def up_to_date_report():
             valid_rate(grouped)['percents'].sum()
     except AttributeError:
         pass
+
 
 def join_py_on_sp(date):
     wb = xw.Book.caller()
@@ -288,6 +289,8 @@ def valid_rate(data):
         groups.append(group)
 
     new_data = pd.concat(groups).sort_values(['borrowing'])
+
+
     new_data.reset_index(drop=False, inplace=True)
     new_data['valid_days'] = \
         (new_data['valid_until'] - new_data['valid_from']).dt.days
@@ -297,12 +300,13 @@ def valid_rate(data):
         new_data['body'] * new_data['valid_rate']
 
     for i, row in payments.iterrows():
-            for j, g in new_data.iterrows():
-                if row['borrowing'] == g['borrowing'] \
-                        and g['valid_from'] < row['date'] <= g['valid_until']:
-                    if row['type'] == '1':
+        for j, g in new_data.iterrows():
+            if row['borrowing'] == g['borrowing'] \
+                    and g['s_date'] < row['date'] <= g['prlng_until']:
+                if row['type'] == '1':
                         new_data['percents'][j] -= row['amount']
-                    elif row['type'] == '2':
+                elif row['type'] == '2':
+                        new_data['body'][j] -= row['amount']
                         new_data['body'][(j+1):].loc[new_data['borrowing'] == g['borrowing']] -= row['amount']
 
     new_data['percents'] += ((new_data['valid_until'] -
