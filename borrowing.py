@@ -252,8 +252,7 @@ def valid_rate(data):
     data['valid_from'] = None
     data['valid_until'] = None
     data['valid_rate'] = data['agr_rate']
-    payments = join_py_on_sp(end_date)
-    new_data = pd.DataFrame()
+    payments = join_py_on_sp(end_date).sort_values(['date'])
 
     for item in data.index:
         indexes.append(item[0])
@@ -287,26 +286,27 @@ def valid_rate(data):
 
         groups.append(group)
 
-    new_data = pd.concat(groups).sort_values(['borrowing'])
+    new_data = pd.concat(groups).sort_values(['borrowing', 's_date'])
+
     new_data.reset_index(drop=False, inplace=True)
     new_data['valid_days'] = \
         (new_data['valid_until'] - new_data['valid_from']).dt.days
-    new_data['percents'] = 0
+    new_data['percents'] = 0.00
 
     for i, row in payments.iterrows():
-            for j, g in new_data.iterrows():
-                if row['borrowing'] == g['borrowing'] \
-                        and g['valid_from'] <= row['date'] <= g['valid_until']:
-                    if row['type'] == '1':
-                        pass
-                        # new_data['percents'][j] -= row['amount']
-                    elif row['type'] == '2':
-                        new_data['body'][j] -= row['amount']
-                        new_data['body'][(j+1):].loc[new_data['borrowing'] == g['borrowing']] -= row['amount']
+        for j, g in new_data.iterrows():
+            if row['borrowing'] == g['borrowing'] \
+                    and g['valid_from'] <= row['date'] <= g['valid_until']:
+                if row['type'] == '1':
+                    new_data['percents'][j] -= row['amount']
+                elif row['type'] == '2':
+                    new_data['body'][j] -= row['amount']
+                    new_data['body'][(j+1):].loc[new_data['borrowing'] == g['borrowing']] -= row['amount']
 
     new_data['percents'] += \
-        (new_data['valid_days'] / 365) * \
-        new_data['body'] * new_data['valid_rate']
+        (((new_data['valid_until'] -
+            new_data['valid_from']).dt.days / 365) * \
+        new_data['body'] * new_data['valid_rate']).round(decimals=2)
     new_data = new_data.loc[(new_data['valid_from'] >= start_date) & (new_data['valid_until'] <= end_date) & (new_data['valid_days'] > 0)]
 
     return new_data
