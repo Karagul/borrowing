@@ -6,9 +6,12 @@ import pandas as pd
 
 
 def create_connection(db_file):
+    """Создает полключение к sqlite3 БД"""
     try:
         conn = \
-            sqlite3.connect(db_file, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+            sqlite3.connect(db_file,
+                            detect_types=sqlite3.PARSE_DECLTYPES |
+                            sqlite3.PARSE_COLNAMES)
         return conn
     except Error as e:
         print(e)
@@ -17,6 +20,7 @@ def create_connection(db_file):
 
 
 def create_borrowing(conn, client):
+    """Создает в sqlite3 БД новый договор займа"""
     sql = ''' INSERT INTO borrowing(title, body, rate, start_date, end_date)
               VALUES(?,?,?,?,?)'''
     cur = conn.cursor()
@@ -25,6 +29,7 @@ def create_borrowing(conn, client):
 
 
 def insert_a_borrowing():
+    """Определяет параметры договора займа для последующей вставки в БД"""
     wb = xw.Book.caller()
     title = str(wb.sheets['management'].range("A4").value)
     body = wb.sheets['management'].range("B4").value
@@ -40,14 +45,13 @@ def insert_a_borrowing():
             str(datetime.datetime.now()) + ': ' + str(e)
         return None
     database = os.path.join(os.path.dirname(wb.fullname), 'borrowing.db')
-    # create a database connection
     conn = create_connection(database)
     try:
         with conn:
-            # create a new borrowing
             borrowing = (title, body, rate, start_date, end_date)
             borrowing_id = create_borrowing(conn, borrowing)
-            sup_agreement = (start_date, '__' + title, borrowing_id, rate, end_date)
+            sup_agreement = (start_date,
+                             '__' + title, borrowing_id, rate, end_date)
             sup_agreement_id = create_sup_agreement(conn, sup_agreement)
             wb.sheets['management'].range("A18").color = (146, 208, 80)
             wb.sheets['management'].range("A18").value = \
@@ -61,6 +65,7 @@ def insert_a_borrowing():
 
 
 def create_payment(conn, client):
+    """Создает в sqlite3 БД новый платеж"""
     sql = ''' INSERT INTO payment(date, type, amount, borrowing)
               VALUES(?,?,?,?)'''
     cur = conn.cursor()
@@ -69,6 +74,7 @@ def create_payment(conn, client):
 
 
 def insert_a_payment():
+    """Определяет параметры платежа для последующей вставки в БД"""
     wb = xw.Book.caller()
     borrowing = wb.api.ActiveSheet.OLEObjects("ComboBox1").Object.Value
     amount = wb.sheets['management'].range("D9").value
@@ -93,16 +99,16 @@ def insert_a_payment():
         return None
 
     database = os.path.join(os.path.dirname(wb.fullname), 'borrowing.db')
-    # create a database connection
     conn = create_connection(database)
     try:
         with conn:
-            # create a new payment
             payment = (date, type, amount, borrowing)
             payment_id = create_payment(conn, payment)
             wb.sheets['management'].range("A18").color = (146, 208, 80)
             wb.sheets['management'].range("A18").value = \
-                str(datetime.datetime.now()) + ": Создан платеж в размере " + str(amount)
+                str(datetime.datetime.now()) + \
+                ": Создан платеж в размере " + str(amount) + \
+                " к договору займа " + borrowing
 
     except sqlite3.IntegrityError as e:
         wb.sheets['management'].range("A18").color = (240, 100, 77)
@@ -111,6 +117,7 @@ def insert_a_payment():
 
 
 def create_sup_agreement(conn, client):
+
     sql = '''INSERT INTO sup_agreement(date, title, borrowing, rate, prlng_until)
              VALUES(?,?,?,?,?)'''
     cur = conn.cursor()
@@ -119,6 +126,7 @@ def create_sup_agreement(conn, client):
 
 
 def insert_a_sup_agreement():
+    """Создает в sqlite3 БД новое дополнительное соглашение к договору займа"""
     wb = xw.Book.caller()
     title = wb.sheets['management'].range("B14").value
     borrowing = wb.api.ActiveSheet.OLEObjects("ComboBox2").Object.Value
@@ -134,17 +142,16 @@ def insert_a_sup_agreement():
         return None
 
     database = os.path.join(os.path.dirname(wb.fullname), 'borrowing.db')
-    # create a database connection
     conn = create_connection(database)
     try:
         with conn:
-        # create a new sup_agreement
-            sup_agreement = (date, title, borrowing, rate, prlng_until);
+            sup_agreement = (date, title, borrowing, rate, prlng_until)
             sup_agreement_id = create_sup_agreement(conn, sup_agreement)
             wb.sheets['management'].range("A18").color = (146, 208, 80)
             wb.sheets['management'].range("A18").value = \
                 str(datetime.datetime.now()) + \
-                ": Создано доп. соглашение " + str(title)
+                ": Создано доп. соглашение " + str(title) + \
+                " к договору займа " + borrowing
 
     except sqlite3.IntegrityError as e:
         wb.sheets['management'].range("A18").color = (240, 100, 77)
@@ -153,24 +160,23 @@ def insert_a_sup_agreement():
 
 
 def combobox(command, combo_box_name, source_cell):
+    """Создает новый выпадающий список. Например, с
+    названиями договоров займа"""
     wb = xw.Book.caller()
     source = wb.sheets['source']
-
-    # Place the database next to the Excel file
     database = os.path.join(os.path.dirname(wb.fullname), 'borrowing.db')
-
-    # Database connection and creation of cursor
-    con = sqlite3.connect(database, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    con = sqlite3.connect(database,
+                          detect_types=sqlite3.PARSE_DECLTYPES |
+                          sqlite3.PARSE_COLNAMES)
     cursor = con.cursor()
-
-    # Database Query
     cursor.execute(command)
 
-    #
+    # Очищает данные в целевом диапазоне
+    # затем вставляет в диапазон данные из sql-запроса
     source.range(source_cell).expand().clear_contents()
     source.range(source_cell).value = cursor.fetchall()
 
-    #
+    # Создает выпадающий список
     combo = combo_box_name
     wb.api.ActiveSheet.OLEObjects(combo).Object.ListFillRange = \
         'Source!{}'.format(str(source.range(source_cell).expand().address))
@@ -178,7 +184,7 @@ def combobox(command, combo_box_name, source_cell):
     wb.api.ActiveSheet.OLEObjects(combo).Object.ColumnCount = 2
     wb.api.ActiveSheet.OLEObjects(combo).Object.ColumnWidths = 0
 
-    # Close cursor and connection
+    # Закрывает соединение с БД
     cursor.close()
     con.close()
 
